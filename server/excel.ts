@@ -93,7 +93,9 @@ export async function buildStudentTemplateWorkbook(params: {
     { header: 'current_year', key: 'current_year', width: 15 },
     { header: 'batch_code', key: 'batch_code', width: 15 },
     { header: 'minor_stream', key: 'minor_stream', width: 24 },
-    { header: 'is_detained', key: 'is_detained', width: 15 },
+    { header: 'is_detained', key: 'is_detained', width: 14 },
+    { header: 'eligibility_status', key: 'eligibility_status', width: 24 },
+    { header: 'is_pwd', key: 'is_pwd', width: 12 },
   ];
 
   const headerRow = ws.getRow(1);
@@ -146,6 +148,22 @@ export async function buildStudentTemplateWorkbook(params: {
       errorTitle: 'Detained Status',
       error: 'Select YES or NO.',
     };
+    ws.getCell(`H${r}`).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"ELIGIBLE,CONDONATION_PENDING,DETAINED"'],
+      showErrorMessage: true,
+      errorTitle: 'Eligibility Status',
+      error: 'Select ELIGIBLE, CONDONATION_PENDING, or DETAINED.',
+    };
+    ws.getCell(`I${r}`).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"NO,YES"'],
+      showErrorMessage: true,
+      errorTitle: 'PwD Accessibility',
+      error: 'Select YES or NO.',
+    };
   }
 
   ws.addConditionalFormatting({
@@ -174,8 +192,129 @@ export async function buildStudentTemplateWorkbook(params: {
     ],
   });
 
+  ws.addConditionalFormatting({
+    ref: 'H2:H500',
+    rules: [
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 1,
+        formulae: ['"DETAINED"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEE2E2' } },
+          font: { color: { argb: 'FF991B1B' }, bold: true },
+        },
+      },
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 2,
+        formulae: ['"CONDONATION_PENDING"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEF3C7' } },
+          font: { color: { argb: 'FF92400E' }, bold: true },
+        },
+      },
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 3,
+        formulae: ['"ELIGIBLE"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } },
+          font: { color: { argb: 'FF166534' }, bold: true },
+        },
+      },
+    ],
+  });
+
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+/**
+ * Generates Course-Specific Eligibility & Supplementary Mapping Excel Template
+ */
+export async function buildCourseEligibilityTemplateWorkbook(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('CourseEligibility', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+
+  ws.columns = [
+    { header: 'roll_no', key: 'roll_no', width: 20 },
+    { header: 'course_code', key: 'course_code', width: 18 },
+    { header: 'status', key: 'status', width: 26 },
+    { header: 'remarks', key: 'remarks', width: 36 },
+  ];
+
+  const headerRow = ws.getRow(1);
+  headerRow.height = 24;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B5299' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+
+  for (let r = 2; r <= 500; r++) {
+    ws.getCell(`C${r}`).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"ELIGIBLE,CONDONATION_PENDING,DETAINED,SUPPLEMENTARY"'],
+      showErrorMessage: true,
+      errorTitle: 'Course Eligibility Status',
+      error: 'Select ELIGIBLE, CONDONATION_PENDING, DETAINED, or SUPPLEMENTARY.',
+    };
+  }
+
+  ws.addConditionalFormatting({
+    ref: 'C2:C500',
+    rules: [
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 1,
+        formulae: ['"DETAINED"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEE2E2' } },
+          font: { color: { argb: 'FF991B1B' }, bold: true },
+        },
+      },
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 2,
+        formulae: ['"CONDONATION_PENDING"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEF3C7' } },
+          font: { color: { argb: 'FF92400E' }, bold: true },
+        },
+      },
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 3,
+        formulae: ['"SUPPLEMENTARY"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFE0F2FE' } },
+          font: { color: { argb: 'FF075985' }, bold: true },
+        },
+      },
+      {
+        type: 'cellIs',
+        operator: 'equal',
+        priority: 4,
+        formulae: ['"ELIGIBLE"'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } },
+          font: { color: { argb: 'FF166534' }, bold: true },
+        },
+      },
+    ],
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
 }
 
 /**
@@ -251,8 +390,8 @@ export async function buildWillingnessTemplateWorkbook(params: {
   const cleanDates = params.dates.filter(Boolean);
   const datesToUse = cleanDates.length > 0 ? cleanDates : [new Date().toISOString().slice(0, 10)];
 
-  // Columns: A=S.No, B=Id, C=Name, D=Designation, then pairs (FN, AN) per date, then Signature
-  const totalCols = 4 + datesToUse.length * 2 + 1;
+  // Columns: A=S.No, B=Id, C=Name, D=Designation, E=Course Codes, then pairs (FN, AN) per date, then Signature
+  const totalCols = 5 + datesToUse.length * 2 + 1;
   const lastColLetter = ws.getColumn(totalCols).letter;
 
   ws.mergeCells(`A1:${lastColLetter}1`);
@@ -275,7 +414,8 @@ export async function buildWillingnessTemplateWorkbook(params: {
     { col: 1, title: 'S.No', width: 8 },
     { col: 2, title: 'Id', width: 12 },
     { col: 3, title: 'Name', width: 32 },
-    { col: 4, title: 'Designation', width: 28 },
+    { col: 4, title: 'Designation', width: 26 },
+    { col: 5, title: 'Course Codes', width: 22 },
   ];
 
   for (const fc of fixedCols) {
@@ -289,7 +429,7 @@ export async function buildWillingnessTemplateWorkbook(params: {
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
   }
 
-  let colCursor = 5;
+  let colCursor = 6;
   const slotColLetters: string[] = [];
 
   for (const isoDate of datesToUse) {
@@ -401,6 +541,7 @@ export interface ParsedWillingnessEntry {
   exam_date: string;
   session_slot: SessionSlot;
   willing: 'YES' | 'NO';
+  teaching_courses: string[];
 }
 
 /**
@@ -463,6 +604,9 @@ export function parseAndValidateWillingnessWorkbook(buffer: Buffer): {
   const idCol = normTop.indexOf('id');
   const nameCol = normTop.indexOf('name');
   const desigCol = normTop.indexOf('designation');
+  const courseCol = normTop.findIndex((h) =>
+    ['coursecodes', 'teachingcourses', 'courses', 'subjectcodes', 'subjects'].includes(h)
+  );
 
   if (idCol === -1 || nameCol === -1 || desigCol === -1) {
     throw new Error(
@@ -542,6 +686,10 @@ export function parseAndValidateWillingnessWorkbook(buffer: Buffer): {
     const empId = String(row[idCol] ?? '').trim();
     const facultyName = String(row[nameCol] ?? '').trim();
     const designation = String(row[desigCol] ?? '').trim();
+    const rawCourses = courseCol !== -1 ? String(row[courseCol] ?? '').trim() : '';
+    const teachingCourses = rawCourses
+      ? [...new Set(rawCourses.split(/[,;/\s]+/).map((c) => c.trim().toUpperCase()).filter(Boolean))]
+      : [];
 
     if (!empId && !facultyName) continue;
 
@@ -576,6 +724,7 @@ export function parseAndValidateWillingnessWorkbook(buffer: Buffer): {
         exam_date: slotCol.exam_date,
         session_slot: slotCol.session_slot,
         willing,
+        teaching_courses: teachingCourses,
       });
     }
   }

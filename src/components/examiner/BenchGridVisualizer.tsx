@@ -87,18 +87,21 @@ export function BenchGridVisualizer({
 
                       if (cells) {
                         const roll = cell?.roll_no_snapshot || '';
+                        const isBufferCell = !roll && cell?.cohort_label === 'BUFFER';
                         return (
                           <div
                             key={sIdx}
                             className={`h-7 px-1.5 flex items-center justify-center font-mono-tabular text-[11px] border ${
                               isCellEmptyHeader
                                 ? 'bg-slate-100 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-700 text-slate-400'
-                                : roll
-                                  ? 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 font-semibold text-slate-900 dark:text-white'
-                                  : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-300'
+                                : isBufferCell
+                                  ? 'bg-amber-50 dark:bg-amber-950/40 border-dashed border-amber-400 dark:border-amber-700 text-amber-700 dark:text-amber-300 text-[9px] font-semibold'
+                                  : roll
+                                    ? 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 font-semibold text-slate-900 dark:text-white'
+                                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-300'
                             }`}
                           >
-                            {isCellEmptyHeader ? '—' : roll || ''}
+                            {isCellEmptyHeader ? '—' : isBufferCell ? 'BUFFER' : roll || ''}
                           </div>
                         );
                       }

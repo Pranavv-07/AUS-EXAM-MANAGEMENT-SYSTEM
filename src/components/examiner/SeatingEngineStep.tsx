@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Play, ArrowUpRight, Grid, Eye } from 'lucide-react';
+import { Play, ArrowUpRight, Grid, Eye, ShieldAlert, UserPlus } from 'lucide-react';
 import { apiFetch } from '../../lib/api.ts';
 import type {
   ExamLayoutConfig,
   ExamSession,
+  ExcludedStudentInfo,
   HallAllocation,
   InterleaveStyle,
   MasterSummaryRow,
@@ -48,14 +49,26 @@ export function SeatingEngineStep({
   const [roomPatterns, setRoomPatterns] = useState<Record<string, number[]>>(
     activeSession?.layout_config?.room_patterns || {}
   );
+  const [bufferSeatsPerHall, setBufferSeatsPerHall] = useState<number>(
+    activeSession?.layout_config?.buffer_seats_per_hall ?? 0
+  );
   const [minorFilter, setMinorFilter] = useState<string>(
     activeSession?.minor_stream_filter || 'ALL'
   );
   const [minorOptions, setMinorOptions] = useState<MinorStreamOption[]>([]);
+  const [excludedStudents, setExcludedStudents] = useState<ExcludedStudentInfo[]>([]);
   const [inspectIdx, setInspectIdx] = useState(0);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+
+  // Post-allocation late-registrant buffer slotting state
+  const [lateRollNo, setLateRollNo] = useState('');
+  const [lateFullName, setLateFullName] = useState('');
+  const [lateBranch, setLateBranch] = useState(activeSession?.target_branches?.[0] || 'CSE');
+  const [lateYear, setLateYear] = useState<number>(activeSession?.target_years?.[0] || 2);
+  const [lateHallId, setLateHallId] = useState<number>(0);
+  const [slotting, setSlotting] = useState(false);
 
   useEffect(() => {
     apiFetch<MinorStreamOption[]>('/api/minor-streams')
@@ -68,9 +81,19 @@ export function SeatingEngineStep({
       setSeatingMode(activeSession.seating_mode);
       setInterleaveStyle(activeSession.layout_config?.interleave_style || 'ALTERNATE_SEATS');
       setRoomPatterns(activeSession.layout_config?.room_patterns || {});
+      setBufferSeatsPerHall(activeSession.layout_config?.buffer_seats_per_hall ?? 0);
       setMinorFilter(activeSession.minor_stream_filter || 'ALL');
+      setLateBranch(activeSession.target_branches?.[0] || 'CSE');
+      setLateYear(activeSession.target_years?.[0] || 2);
+      setExcludedStudents([]);
     }
   }, [activeSession?.id]);
+
+  useEffect(() => {
+    if (allocations.length > 0 && !allocations.some((a) => a.hall_id === lateHallId)) {
+      setLateHallId(allocations[0].hall_id);
+    }
+  }, [allocations]);
 
   if (!activeSession) {
     return (
@@ -89,13 +112,18 @@ export function SeatingEngineStep({
     setStatusMsg('');
     try {
       const layoutConfig: ExamLayoutConfig = {
+        ...(activeSession.layout_config || {}),
         interleave_style: interleaveStyle,
         room_patterns: roomPatterns,
+        buffer_seats_per_hall: bufferSeatsPerHall,
       };
       const res = await apiFetch<{
         session: ExamSession;
         allocations: HallAllocation[];
         summary_rows: MasterSummaryRow[];
+        excluded_students?: ExcludedStudentInfo[];
+        excluded_count?: number;
+        hold_count?: number;
       }>(`/api/exams/${activeSession.id}/allocate`, {
         method: 'POST',
         body: JSON.stringify({
@@ -105,15 +133,61 @@ export function SeatingEngineStep({
         }),
       });
       onAllocationsUpdated(res.session, res.allocations, res.summary_rows);
+      setExcludedStudents(res.excluded_students || []);
       setInspectIdx(0);
       const total = res.allocations.reduce((s, a) => s + a.allocated_count, 0);
       setStatusMsg(
-        `Seating matrix computed: ${total} students assigned across ${res.allocations.length} halls.`
+        `Seating matrix computed: ${total} students assigned across ${res.allocations.length} halls.${
+          res.excluded_count
+            ? ` (${res.excluded_count} detained / on verification hold excluded automatically)`
+            : ''
+        }`
       );
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function handleSlotLateStudent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!activeSession || !lateRollNo.trim() || !lateHallId) return;
+    setSlotting(true);
+    setError('');
+    setStatusMsg('');
+    try {
+      const res = await apiFetch<{
+        session: ExamSession;
+        allocations: HallAllocation[];
+        summary_rows: MasterSummaryRow[];
+        slotted_room: string;
+        slotted_seat: string;
+        used_buffer: boolean;
+      }>(`/api/exams/${activeSession.id}/pin-seat`, {
+        method: 'POST',
+        body: JSON.stringify({
+          roll_no: lateRollNo.trim().toUpperCase(),
+          full_name: lateFullName.trim() || undefined,
+          branch: lateBranch.trim().toUpperCase(),
+          current_year: lateYear,
+          hall_id: lateHallId,
+        }),
+      });
+      onAllocationsUpdated(res.session, res.allocations, res.summary_rows);
+      const slottedIdx = res.allocations.findIndex((a) => a.hall_id === lateHallId);
+      if (slottedIdx >= 0) setInspectIdx(slottedIdx);
+      setStatusMsg(
+        `Slotted ${lateRollNo.trim().toUpperCase()} into ${res.slotted_room} (${res.slotted_seat}${
+          res.used_buffer ? ' · Reserved Buffer Seat' : ''
+        }) without modifying any other room.`
+      );
+      setLateRollNo('');
+      setLateFullName('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSlotting(false);
     }
   }
 
@@ -293,7 +367,80 @@ export function SeatingEngineStep({
             </select>
           </div>
         )}
+
+        <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Buffer Seats per Hall (Emergency / Late Reg):
+            </span>
+            <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">
+              PwD students are prioritized onto Ground Floor rooms automatically.
+            </span>
+          </div>
+          <div className="inline-flex border border-slate-300 dark:border-slate-700">
+            {[0, 1, 2].map((count) => (
+              <button
+                key={count}
+                type="button"
+                onClick={() => setBufferSeatsPerHall(count)}
+                className={`px-3 py-1 text-xs font-mono-tabular font-semibold cursor-pointer ${
+                  count > 0 ? 'border-l border-slate-300 dark:border-slate-700' : ''
+                } ${
+                  bufferSeatsPerHall === count
+                    ? 'bg-[#0b5299] text-white'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                {count} {count === 1 ? 'Seat' : 'Seats'}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* Excluded / Verification Hold Alert */}
+      {excludedStudents.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-[8px] p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-display text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4" />
+              <span>
+                Verification Hold &amp; Excluded Students ({excludedStudents.length} filtered out)
+              </span>
+            </h3>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Global detained, course-detained, and condonation pending holds are excluded automatically
+            </span>
+          </div>
+          <div className="max-h-[160px] overflow-y-auto border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+            {excludedStudents.map((ex) => (
+              <div
+                key={`${ex.roll_no}-${ex.reason}-${ex.course_code || ''}`}
+                className="px-3 py-2 flex flex-wrap items-center justify-between gap-2"
+              >
+                <div>
+                  <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                    {ex.roll_no}
+                  </span>{' '}
+                  <span className="text-slate-600 dark:text-slate-400">
+                    — {ex.full_name} ({ex.branch} Year {ex.current_year})
+                  </span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 font-mono-tabular text-[11px] font-semibold ${
+                    ex.reason === 'CONDONATION_PENDING'
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200'
+                      : 'bg-red-100 text-[#ff0000] dark:bg-red-950 dark:text-red-300'
+                  }`}
+                >
+                  {ex.reason}
+                  {ex.course_code ? ` · ${ex.course_code}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Yield Table + Live Matrix Inspector */}
       {allocations.length === 0 ? (
@@ -403,6 +550,108 @@ export function SeatingEngineStep({
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Post-Allocation Single-Room Buffer Slotting */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[8px] p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h2 className="font-display text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-[#cf6c38]" />
+                  <span>Slot Late / Re-Registered Student into Buffer Seat (Single Room Only)</span>
+                </h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Adds a student (e.g. AUS-26-10392) into a reserved BUFFER or open seat in one hall without regenerating or disturbing any other room sheet.
+                </p>
+              </div>
+            </div>
+            <form onSubmit={handleSlotLateStudent} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-3">
+                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Roll No
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={lateRollNo}
+                  onChange={(e) => setLateRollNo(e.target.value)}
+                  placeholder="AUS-26-10392"
+                  className="w-full px-3 py-2 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Student Name (Optional if in DB)
+                </label>
+                <input
+                  type="text"
+                  value={lateFullName}
+                  onChange={(e) => setLateFullName(e.target.value)}
+                  placeholder="Full Name"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Branch
+                </label>
+                <input
+                  type="text"
+                  value={lateBranch}
+                  onChange={(e) => setLateBranch(e.target.value)}
+                  className="w-full px-2.5 py-2 text-xs font-mono-tabular uppercase border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Year
+                </label>
+                <select
+                  value={lateYear}
+                  onChange={(e) => setLateYear(Number(e.target.value))}
+                  className="w-full px-2 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                >
+                  {[1, 2, 3, 4].map((y) => (
+                    <option key={y} value={y}>
+                      Y{y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Target Hall (Open Buffer/Empty)
+                </label>
+                <select
+                  value={lateHallId || allocations[0]?.hall_id || 0}
+                  onChange={(e) => setLateHallId(Number(e.target.value))}
+                  className="w-full px-2.5 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                >
+                  {allocations.map((a) => {
+                    const bufLeft = a.cells.filter(
+                      (c) => !c.roll_no_snapshot && c.cohort_label === 'BUFFER'
+                    ).length;
+                    const empLeft = a.cells.filter(
+                      (c) => !c.roll_no_snapshot && c.cohort_label !== 'EMPTY' && c.cohort_label !== 'BUFFER'
+                    ).length;
+                    return (
+                      <option key={a.hall_id} value={a.hall_id}>
+                        {a.hall.room_no} ({bufLeft} buf · {empLeft} free)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={slotting}
+                  className="w-full py-2 px-3 text-xs font-medium bg-[#0b5299] hover:bg-[#003a77] text-white rounded-none cursor-pointer"
+                >
+                  {slotting ? 'Slotting...' : 'Slot into Room'}
+                </button>
+              </div>
+            </form>
           </div>
 
           {/* Bench-Spaced Visual Grid Preview for Inspected Room */}

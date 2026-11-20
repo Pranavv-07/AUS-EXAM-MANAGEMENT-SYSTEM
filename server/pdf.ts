@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import PDFDocument from 'pdfkit';
 import type { ExamSession, HallAllocation, MasterSummaryRow } from '../src/types/exam.ts';
-import { buildMasterSummaryRows, resolveHallBenchPattern } from './seating.ts';
+import { buildDispatchSummary, buildMasterSummaryRows, resolveHallBenchPattern } from './seating.ts';
 
 const OFFICIAL_LOGO_PATH = path.resolve(process.cwd(), 'public/assets/aistudio/image_9c337579.png');
 
@@ -861,6 +861,199 @@ export function generateProformaPdfBuffer(
     doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
     doc.text('Dept. Examcell In-Charge', margin, sigY, { width: 180, align: 'left' });
     doc.text('Chief Superintendent / HOD', pageWidth - margin - 180, sigY, { width: 180, align: 'right' });
+
+    doc.end();
+  });
+}
+
+export function generateDispatchPdfBuffer(
+  session: ExamSession,
+  allocations: HallAllocation[],
+  bufferPct = 5
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 34 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pageWidth = doc.page.width;
+    const pageHeight = doc.page.height;
+    const margin = 34;
+    const usableWidth = pageWidth - margin * 2;
+    const dispatch = buildDispatchSummary(session, allocations, bufferPct);
+
+    let y = drawUniversityHeader(
+      doc,
+      pageWidth,
+      margin,
+      session.department,
+      `QUESTION PAPER & ANSWER BOOKLET DISPATCH SHEET (+${dispatch.bufferPct}% BUFFER)`
+    );
+
+    doc
+      .fillColor('#000000')
+      .font('Helvetica-Bold')
+      .fontSize(9.5)
+      .text(session.exam_title.toUpperCase(), margin, y, { width: usableWidth, align: 'center' });
+    y += 14;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .text(
+        `Date: ${session.exam_date}   |   Session: ${session.session_slot} (${session.session_timing})   |   Stationery Buffer: +${dispatch.bufferPct}%`,
+        margin,
+        y,
+        { width: usableWidth, align: 'center' }
+      );
+    y += 18;
+
+    // Section 1: Floor-Wise Consolidation
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0b5299').text('1. FLOOR-WISE CONSOLIDATED DISPATCH', margin, y);
+    y += 14;
+
+    const fCols = {
+      sno: 30,
+      bhavan: 60,
+      floor: 90,
+      rooms: 55,
+      students: 70,
+      qp: 75,
+      booklets: 80,
+      seal: usableWidth - (30 + 60 + 90 + 55 + 70 + 75 + 80),
+    };
+
+    const drawFloorHeader = (hy: number) => {
+      let x = margin;
+      drawCellBox(doc, x, hy, fCols.sno, 20, 'S.No', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.sno;
+      drawCellBox(doc, x, hy, fCols.bhavan, 20, 'Bhavan', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.bhavan;
+      drawCellBox(doc, x, hy, fCols.floor, 20, 'Floor', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.floor;
+      drawCellBox(doc, x, hy, fCols.rooms, 20, 'Rooms', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.rooms;
+      drawCellBox(doc, x, hy, fCols.students, 20, 'Students', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.students;
+      drawCellBox(doc, x, hy, fCols.qp, 20, `QP (+${dispatch.bufferPct}%)`, { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.qp;
+      drawCellBox(doc, x, hy, fCols.booklets, 20, `Booklets (+${dispatch.bufferPct}%)`, { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += fCols.booklets;
+      drawCellBox(doc, x, hy, fCols.seal, 20, 'Floor Sign', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      return hy + 20;
+    };
+
+    y = drawFloorHeader(y);
+    const fRowH = 20;
+    dispatch.floorSummaries.forEach((f, idx) => {
+      if (y + fRowH > pageHeight - 100) {
+        doc.addPage({ size: 'A4', layout: 'portrait', margin: 34 });
+        y = drawFloorHeader(margin);
+      }
+      let x = margin;
+      drawCellBox(doc, x, y, fCols.sno, fRowH, String(idx + 1), { fontSize: 7.5 });
+      x += fCols.sno;
+      drawCellBox(doc, x, y, fCols.bhavan, fRowH, f.building_code, { bold: true, fontSize: 7.5 });
+      x += fCols.bhavan;
+      drawCellBox(doc, x, y, fCols.floor, fRowH, f.floor, { fontSize: 7.5 });
+      x += fCols.floor;
+      drawCellBox(doc, x, y, fCols.rooms, fRowH, String(f.rooms_count), { fontSize: 7.5 });
+      x += fCols.rooms;
+      drawCellBox(doc, x, y, fCols.students, fRowH, String(f.student_count), { bold: true, fontSize: 8 });
+      x += fCols.students;
+      drawCellBox(doc, x, y, fCols.qp, fRowH, String(f.qp_with_buffer), { bold: true, fontSize: 8 });
+      x += fCols.qp;
+      drawCellBox(doc, x, y, fCols.booklets, fRowH, String(f.booklets_with_buffer), { bold: true, fontSize: 8 });
+      x += fCols.booklets;
+      drawCellBox(doc, x, y, fCols.seal, fRowH, '', { fontSize: 7.5 });
+      y += fRowH;
+    });
+
+    const fBefore = fCols.sno + fCols.bhavan + fCols.floor;
+    drawCellBox(doc, margin, y, fBefore, 20, 'TOTAL', { bold: true, align: 'right', fill: '#eef3f9', paddingX: 6, fontSize: 8 });
+    drawCellBox(doc, margin + fBefore, y, fCols.rooms, 20, String(dispatch.totals.rooms), { bold: true, fill: '#eef3f9', fontSize: 8 });
+    drawCellBox(doc, margin + fBefore + fCols.rooms, y, fCols.students, 20, String(dispatch.totals.students), { bold: true, fill: '#eef3f9', fontSize: 8 });
+    drawCellBox(doc, margin + fBefore + fCols.rooms + fCols.students, y, fCols.qp, 20, String(dispatch.totals.qp_with_buffer), { bold: true, fill: '#eef3f9', fontSize: 8 });
+    drawCellBox(doc, margin + fBefore + fCols.rooms + fCols.students + fCols.qp, y, fCols.booklets, 20, String(dispatch.totals.booklets_with_buffer), { bold: true, fill: '#eef3f9', fontSize: 8 });
+    drawCellBox(doc, margin + fBefore + fCols.rooms + fCols.students + fCols.qp + fCols.booklets, y, fCols.seal, 20, '', { fill: '#eef3f9' });
+    y += 32;
+
+    // Section 2: Room-Wise & Subject-Wise Dispatch
+    if (y + 60 > pageHeight - 70) {
+      doc.addPage({ size: 'A4', layout: 'portrait', margin: 34 });
+      y = margin;
+    }
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0b5299').text('2. ROOM-WISE & SUBJECT-WISE PACKET DISPATCH', margin, y);
+    y += 14;
+
+    const rCols = {
+      sno: 28,
+      room: 60,
+      floor: 66,
+      cohort: 72,
+      subject: 120,
+      students: 46,
+      qp: 46,
+      booklets: 46,
+      sign: usableWidth - (28 + 60 + 66 + 72 + 120 + 46 + 46 + 46),
+    };
+
+    const drawRoomHeader = (hy: number) => {
+      let x = margin;
+      drawCellBox(doc, x, hy, rCols.sno, 22, 'S.No', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.sno;
+      drawCellBox(doc, x, hy, rCols.room, 22, 'Room No', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.room;
+      drawCellBox(doc, x, hy, rCols.floor, 22, 'Floor', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.floor;
+      drawCellBox(doc, x, hy, rCols.cohort, 22, 'Cohort', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.cohort;
+      drawCellBox(doc, x, hy, rCols.subject, 22, 'Course / Subject', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.subject;
+      drawCellBox(doc, x, hy, rCols.students, 22, 'Count', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.students;
+      drawCellBox(doc, x, hy, rCols.qp, 22, 'QP Req.', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.qp;
+      drawCellBox(doc, x, hy, rCols.booklets, 22, 'Booklets', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      x += rCols.booklets;
+      drawCellBox(doc, x, hy, rCols.sign, 22, 'Seal Sign', { bold: true, fill: '#eef3f9', fontSize: 7.5 });
+      return hy + 22;
+    };
+
+    y = drawRoomHeader(y);
+    const rRowH = 20;
+    dispatch.roomRows.forEach((r, idx) => {
+      if (y + rRowH > pageHeight - 75) {
+        doc.addPage({ size: 'A4', layout: 'portrait', margin: 34 });
+        y = drawRoomHeader(margin);
+      }
+      let x = margin;
+      drawCellBox(doc, x, y, rCols.sno, rRowH, String(idx + 1), { fontSize: 7.5 });
+      x += rCols.sno;
+      drawCellBox(doc, x, y, rCols.room, rRowH, r.room_no, { bold: true, fontSize: 7.5 });
+      x += rCols.room;
+      drawCellBox(doc, x, y, rCols.floor, rRowH, r.floor, { fontSize: 7 });
+      x += rCols.floor;
+      drawCellBox(doc, x, y, rCols.cohort, rRowH, r.cohort_label, { bold: true, fontSize: 7.5 });
+      x += rCols.cohort;
+      drawCellBox(doc, x, y, rCols.subject, rRowH, r.subject, { align: 'left', paddingX: 4, fontSize: 7 });
+      x += rCols.subject;
+      drawCellBox(doc, x, y, rCols.students, rRowH, String(r.student_count), { fontSize: 7.5 });
+      x += rCols.students;
+      drawCellBox(doc, x, y, rCols.qp, rRowH, String(r.qp_with_buffer), { bold: true, fontSize: 7.5 });
+      x += rCols.qp;
+      drawCellBox(doc, x, y, rCols.booklets, rRowH, String(r.booklets_with_buffer), { bold: true, fontSize: 7.5 });
+      x += rCols.booklets;
+      drawCellBox(doc, x, y, rCols.sign, rRowH, '', { fontSize: 7 });
+      y += rRowH;
+    });
+
+    const sigY = Math.max(y + 34, pageHeight - 58);
+    doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
+    doc.text('Dept. Examcell In-Charge', margin, sigY, { width: 180, align: 'left' });
+    doc.text('QP Custodian / Chief Superintendent', pageWidth - margin - 200, sigY, { width: 200, align: 'right' });
 
     doc.end();
   });

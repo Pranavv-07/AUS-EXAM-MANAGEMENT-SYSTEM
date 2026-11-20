@@ -1,8 +1,24 @@
-import React, { useState } from 'react';
-import { Download, Printer, FileText, Grid, ClipboardList, FileCheck, Copy, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  Download,
+  Printer,
+  FileText,
+  Grid,
+  ClipboardList,
+  FileCheck,
+  Copy,
+  Check,
+  PackageCheck,
+} from 'lucide-react';
 import { UniversityCrest } from '../UniversityCrest.tsx';
-import { downloadAuthorizedFile } from '../../lib/api.ts';
-import type { ExamSession, HallAllocation, MasterSummaryRow } from '../../types/exam.ts';
+import { apiFetch, downloadAuthorizedFile } from '../../lib/api.ts';
+import type {
+  DispatchFloorSummary,
+  DispatchRoomRow,
+  ExamSession,
+  HallAllocation,
+  MasterSummaryRow,
+} from '../../types/exam.ts';
 import { BenchGridVisualizer } from './BenchGridVisualizer.tsx';
 
 interface PreviewExportStepProps {
@@ -16,12 +32,46 @@ export function PreviewExportStep({
   allocations,
   summaryRows,
 }: PreviewExportStepProps) {
-  const [docMode, setDocMode] = useState<'master' | 'room' | 'proforma'>('master');
+  const [docMode, setDocMode] = useState<'master' | 'room' | 'proforma' | 'dispatch'>('master');
   const [selectedRoomIdx, setSelectedRoomIdx] = useState(0);
   const [includeSubject, setIncludeSubject] = useState(true);
+  const [dispatchBufferPct, setDispatchBufferPct] = useState<number>(
+    activeSession?.layout_config?.dispatch_buffer_pct ?? 5
+  );
+  const [dispatchData, setDispatchData] = useState<{
+    bufferPct: number;
+    roomRows: DispatchRoomRow[];
+    floorSummaries: DispatchFloorSummary[];
+    totals: {
+      rooms: number;
+      students: number;
+      qp_with_buffer: number;
+      booklets_with_buffer: number;
+    };
+  } | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!activeSession || allocations.length === 0) {
+      setDispatchData(null);
+      return;
+    }
+    apiFetch<{
+      bufferPct: number;
+      roomRows: DispatchRoomRow[];
+      floorSummaries: DispatchFloorSummary[];
+      totals: {
+        rooms: number;
+        students: number;
+        qp_with_buffer: number;
+        booklets_with_buffer: number;
+      };
+    }>(`/api/exams/${activeSession.id}/dispatch?bufferPct=${dispatchBufferPct}`)
+      .then((res) => setDispatchData(res))
+      .catch(() => {});
+  }, [activeSession?.id, allocations, dispatchBufferPct]);
 
   if (!activeSession || allocations.length === 0) {
     return (
@@ -35,7 +85,9 @@ export function PreviewExportStep({
 
   const activeAlloc = allocations[Math.min(selectedRoomIdx, allocations.length - 1)];
 
-  async function handleDownload(type: 'master' | 'rooms' | 'bundle' | 'attendance' | 'proforma') {
+  async function handleDownload(
+    type: 'master' | 'rooms' | 'bundle' | 'attendance' | 'proforma' | 'dispatch'
+  ) {
     if (!activeSession) return;
     setDownloading(type);
     setError('');
@@ -60,6 +112,11 @@ export function PreviewExportStep({
         await downloadAuthorizedFile(
           `/api/exams/${activeSession.id}/pdf/proforma`,
           `AU_Examination_Proforma_${activeSession.exam_date}_${activeSession.session_slot}.pdf`
+        );
+      } else if (type === 'dispatch') {
+        await downloadAuthorizedFile(
+          `/api/exams/${activeSession.id}/pdf/dispatch?bufferPct=${dispatchBufferPct}`,
+          `AU_QP_Booklet_Dispatch_${activeSession.exam_date}_${activeSession.session_slot}.pdf`
         );
       } else {
         await downloadAuthorizedFile(
@@ -165,6 +222,20 @@ export function PreviewExportStep({
           <button
             type="button"
             disabled={downloading !== null}
+            onClick={() => void handleDownload('dispatch')}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium border border-[#cf6c38] text-[#cf6c38] dark:text-orange-400 bg-white dark:bg-slate-900 hover:bg-orange-50 dark:hover:bg-slate-800 rounded-none cursor-pointer whitespace-nowrap"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>
+              {downloading === 'dispatch'
+                ? 'Generating...'
+                : `QP Dispatch PDF (+${dispatchBufferPct}%)`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={downloading !== null}
             onClick={() => void handleDownload('bundle')}
             className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium bg-[#0b5299] hover:bg-[#003a77] text-white rounded-none cursor-pointer whitespace-nowrap"
           >
@@ -230,6 +301,18 @@ export function PreviewExportStep({
             <ClipboardList className="w-3.5 h-3.5" />
             <span>Handover Proforma</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setDocMode('dispatch')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-medium border cursor-pointer ${
+              docMode === 'dispatch'
+                ? 'bg-[#0b5299] text-white border-[#0b5299]'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+            }`}
+          >
+            <PackageCheck className="w-3.5 h-3.5" />
+            <span>QP &amp; Booklet Dispatch Sheet</span>
+          </button>
         </div>
 
         {docMode === 'master' ? (
@@ -258,6 +341,28 @@ export function PreviewExportStep({
                 {alloc.hall.room_no}
               </button>
             ))}
+          </div>
+        ) : docMode === 'dispatch' ? (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium text-slate-700 dark:text-slate-300">Stationery Buffer:</span>
+            <div className="inline-flex border border-slate-300 dark:border-slate-700">
+              {[0, 5, 10, 15].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => setDispatchBufferPct(pct)}
+                  className={`px-2.5 py-1 font-mono-tabular text-xs font-semibold cursor-pointer ${
+                    pct > 0 ? 'border-l border-slate-300 dark:border-slate-700' : ''
+                  } ${
+                    dispatchBufferPct === pct
+                      ? 'bg-[#cf6c38] text-white'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  +{pct}%
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
@@ -580,6 +685,144 @@ export function PreviewExportStep({
           <div className="mt-14 flex items-center justify-between text-xs font-bold">
             <span>Dept. Examcell In-Charge</span>
             <span>Chief Superintendent / HOD</span>
+          </div>
+        </div>
+      )}
+
+      {/* DOCUMENT 4 LIVE PREVIEW: QP & ANSWER BOOKLET DISPATCH */}
+      {docMode === 'dispatch' && dispatchData && (
+        <div className="print-only-full bg-white border border-slate-300 p-6 lg:p-10 text-black max-w-5xl mx-auto space-y-6 overflow-x-auto">
+          <div className="flex items-center justify-between border-b-2 border-[#0b5299] pb-4">
+            <UniversityCrest height={44} className="shrink-0" />
+            <div className="text-center flex-1 px-4">
+              <h2 className="font-display text-xl font-bold tracking-wide text-[#0b5299]">
+                ADITYA UNIVERSITY
+              </h2>
+              <p className="text-[11px] text-slate-700">
+                SURAMPALEM - 533437, ANDHRA PRADESH, INDIA
+              </p>
+              <p className="text-xs font-bold text-slate-900 mt-1 uppercase">
+                DEPARTMENT OF {activeSession.department}
+              </p>
+              <p className="text-xs font-bold text-black mt-0.5">
+                QUESTION PAPER &amp; ANSWER BOOKLET DISPATCH SHEET (+{dispatchData.bufferPct}% BUFFER)
+              </p>
+            </div>
+            <div className="w-14 shrink-0" />
+          </div>
+
+          <div className="text-center">
+            <p className="text-xs font-bold uppercase">{activeSession.exam_title}</p>
+            <p className="text-xs font-semibold mt-1">
+              Date: {activeSession.exam_date} · Session: {activeSession.session_slot} (
+              {activeSession.session_timing})
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold uppercase text-[#0b5299]">
+              1. Floor-Wise Consolidated Stationery Summary
+            </h3>
+            <table className="w-full border-collapse border border-black text-xs text-center">
+              <thead>
+                <tr className="bg-[#eef3f9] font-bold">
+                  <th className="border border-black py-2 px-3">Bhavan</th>
+                  <th className="border border-black py-2 px-3">Floor</th>
+                  <th className="border border-black py-2 px-3">Rooms</th>
+                  <th className="border border-black py-2 px-3">Seated Candidates</th>
+                  <th className="border border-black py-2 px-3">
+                    QP Packets (+{dispatchData.bufferPct}%)
+                  </th>
+                  <th className="border border-black py-2 px-3">
+                    Answer Booklets (+{dispatchData.bufferPct}%)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {dispatchData.floorSummaries.map((f) => (
+                  <tr key={`${f.building_code}-${f.floor}`}>
+                    <td className="border border-black py-2 px-3 font-semibold">{f.building_code}</td>
+                    <td className="border border-black py-2 px-3">{f.floor}</td>
+                    <td className="border border-black py-2 px-3 font-mono-tabular">{f.rooms_count}</td>
+                    <td className="border border-black py-2 px-3 font-mono-tabular">{f.student_count}</td>
+                    <td className="border border-black py-2 px-3 font-mono-tabular font-bold">
+                      {f.qp_with_buffer}
+                    </td>
+                    <td className="border border-black py-2 px-3 font-mono-tabular font-bold">
+                      {f.booklets_with_buffer}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-[#eef3f9] font-bold">
+                  <td colSpan={2} className="border border-black py-2 px-3 text-right">
+                    CONSOLIDATED TOTAL
+                  </td>
+                  <td className="border border-black py-2 px-3 font-mono-tabular">
+                    {dispatchData.totals.rooms}
+                  </td>
+                  <td className="border border-black py-2 px-3 font-mono-tabular">
+                    {dispatchData.totals.students}
+                  </td>
+                  <td className="border border-black py-2 px-3 font-mono-tabular">
+                    {dispatchData.totals.qp_with_buffer}
+                  </td>
+                  <td className="border border-black py-2 px-3 font-mono-tabular">
+                    {dispatchData.totals.booklets_with_buffer}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold uppercase text-[#0b5299]">
+              2. Room-Wise &amp; Subject-Wise Packet Dispatch Count
+            </h3>
+            <table className="w-full border-collapse border border-black text-xs text-center">
+              <thead>
+                <tr className="bg-[#eef3f9] font-bold">
+                  <th className="border border-black py-2 px-2">S.No</th>
+                  <th className="border border-black py-2 px-2">Room No</th>
+                  <th className="border border-black py-2 px-2">Floor</th>
+                  <th className="border border-black py-2 px-2">Cohort</th>
+                  <th className="border border-black py-2 px-3">Subject / Paper</th>
+                  <th className="border border-black py-2 px-2">Seated</th>
+                  <th className="border border-black py-2 px-2">
+                    QP Count (+{dispatchData.bufferPct}%)
+                  </th>
+                  <th className="border border-black py-2 px-2">
+                    Booklets (+{dispatchData.bufferPct}%)
+                  </th>
+                  <th className="border border-black py-2 px-3">Packet Seal Sign</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dispatchData.roomRows.map((r, idx) => (
+                  <tr key={`${r.room_no}-${r.cohort_label}`}>
+                    <td className="border border-black py-2 px-2 font-mono-tabular">{idx + 1}</td>
+                    <td className="border border-black py-2 px-2 font-mono-tabular font-semibold">
+                      {r.room_no} ({r.building_code})
+                    </td>
+                    <td className="border border-black py-2 px-2 text-[11px]">{r.floor}</td>
+                    <td className="border border-black py-2 px-2 font-semibold">{r.cohort_label}</td>
+                    <td className="border border-black py-2 px-3 text-left text-[11px]">{r.subject}</td>
+                    <td className="border border-black py-2 px-2 font-mono-tabular">{r.student_count}</td>
+                    <td className="border border-black py-2 px-2 font-mono-tabular font-bold">
+                      {r.qp_with_buffer}
+                    </td>
+                    <td className="border border-black py-2 px-2 font-mono-tabular font-bold">
+                      {r.booklets_with_buffer}
+                    </td>
+                    <td className="border border-black py-2 px-3" />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-14 flex items-center justify-between text-xs font-bold">
+            <span>Stationery &amp; QP Dispatch In-Charge</span>
+            <span>Controller / HOD</span>
           </div>
         </div>
       )}

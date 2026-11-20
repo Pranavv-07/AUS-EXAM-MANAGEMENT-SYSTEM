@@ -11,6 +11,9 @@ export interface User {
   created_at: string;
 }
 
+export type EligibilityStatus = 'ELIGIBLE' | 'CONDONATION_PENDING' | 'DETAINED';
+export type CourseEligibilityStatus = 'ELIGIBLE' | 'CONDONATION_PENDING' | 'DETAINED' | 'SUPPLEMENTARY';
+
 export interface Student {
   id: number;
   roll_no: string;
@@ -20,7 +23,18 @@ export interface Student {
   batch_code: string;
   minor_stream: string;
   is_detained: boolean;
+  eligibility_status: EligibilityStatus;
+  is_pwd: boolean;
   created_at: string;
+}
+
+export interface CourseEligibilityRecord {
+  id: number;
+  roll_no: string;
+  course_code: string;
+  status: CourseEligibilityStatus;
+  remarks: string;
+  updated_at: string;
 }
 
 export interface MinorStreamOption {
@@ -51,6 +65,8 @@ export interface FacultyWillingness {
   exam_date: string;
   session_slot: SessionSlot;
   willing: 'YES' | 'NO';
+  teaching_courses: string[];
+  duty_count?: number;
   uploaded_at: string;
 }
 
@@ -81,9 +97,18 @@ export type ExamStatus = 'DRAFT' | 'ALLOCATED' | 'FINALIZED';
 
 export type InterleaveStyle = 'ALTERNATE_SEATS' | 'BENCH_BLOCKS' | 'PAIRED_COLUMNS';
 
+export interface PinnedStudentOverride {
+  roll_no: string;
+  hall_id: number;
+  reason?: string;
+}
+
 export interface ExamLayoutConfig {
   interleave_style?: InterleaveStyle;
   room_patterns?: Record<string, number[]>;
+  buffer_seats_per_hall?: number;
+  pinned_students?: PinnedStudentOverride[];
+  dispatch_buffer_pct?: number;
 }
 
 export interface ExamSession {
@@ -151,10 +176,23 @@ export interface MasterSummaryRow {
   row_span?: number;
 }
 
+export interface ExcludedStudentInfo {
+  roll_no: string;
+  full_name: string;
+  branch: string;
+  current_year: number;
+  reason: 'DETAINED_GLOBAL' | 'DETAINED_COURSE' | 'CONDONATION_PENDING';
+  course_code?: string;
+}
+
 export interface CapacityValidationResult {
   valid: boolean;
   total_students: number;
   total_capacity: number;
+  buffer_seats_reserved?: number;
+  excluded_count?: number;
+  hold_count?: number;
+  excluded_students?: ExcludedStudentInfo[];
   cohort_breakdown: Array<{
     cohort_label: string;
     student_count: number;
@@ -162,6 +200,26 @@ export interface CapacityValidationResult {
     deficit: number;
   }>;
   message: string;
+}
+
+export interface DispatchRoomRow {
+  room_no: string;
+  building_code: string;
+  floor: string;
+  cohort_label: string;
+  subject: string;
+  student_count: number;
+  qp_with_buffer: number;
+  booklets_with_buffer: number;
+}
+
+export interface DispatchFloorSummary {
+  floor: string;
+  building_code: string;
+  rooms_count: number;
+  student_count: number;
+  qp_with_buffer: number;
+  booklets_with_buffer: number;
 }
 
 export interface AuditLog {

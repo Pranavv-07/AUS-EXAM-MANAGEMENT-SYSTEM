@@ -1,7 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Save, ArrowUpRight, Download, Upload, Trash2, UserCheck } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Save,
+  ArrowUpRight,
+  Download,
+  Upload,
+  Trash2,
+  UserCheck,
+  Wand2,
+  AlertTriangle,
+} from 'lucide-react';
 import { apiFetch, downloadAuthorizedFile } from '../../lib/api.ts';
-import type { ExamSession, FacultyWillingness, HallAllocation } from '../../types/exam.ts';
+import type {
+  ExamSession,
+  FacultyWillingness,
+  HallAllocation,
+  ScheduledSubject,
+} from '../../types/exam.ts';
 import { ConfirmDialog } from '../ConfirmDialog.tsx';
 
 interface WillingnessStepProps {
@@ -44,6 +58,14 @@ export function WillingnessStep({
   const [willingnessRows, setWillingnessRows] = useState<FacultyWillingness[]>([]);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
+  // Conflict checking & Auto-Assign state
+  const [subjectsCatalog, setSubjectsCatalog] = useState<ScheduledSubject[]>([]);
+  const [autoRule, setAutoRule] = useState<'TWO_PER_ROOM' | 'ONE_PER_30'>('TWO_PER_ROOM');
+  const [autoAssigning, setAutoAssigning] = useState(false);
+  const [excludedClashes, setExcludedClashes] = useState<
+    Array<{ emp_id: string; faculty_name: string; reason: string; matching_courses: string[] }>
+  >([]);
+
   async function fetchWillingnessForSession() {
     if (!activeSession) return;
     try {
@@ -58,10 +80,17 @@ export function WillingnessStep({
   }
 
   useEffect(() => {
+    apiFetch<ScheduledSubject[]>('/api/subjects')
+      .then((rows) => setSubjectsCatalog(rows))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (activeSession) {
       setTplDept(activeSession.department || 'Freshman Engineering - I');
       setTplTitle(activeSession.exam_title);
       setTplDates(activeSession.exam_date);
+      setExcludedClashes([]);
       void fetchWillingnessForSession();
     }
   }, [activeSession?.id, activeSession?.exam_date, activeSession?.session_slot]);
@@ -162,6 +191,73 @@ export function WillingnessStep({
       setSaving(false);
     }
   }
+
+  async function handleAutoAssign() {
+    if (!activeSession) return;
+    setAutoAssigning(true);
+    setError('');
+    setStatusMsg('');
+    try {
+      const res = await apiFetch<{
+        assigned_rooms: number;
+        unfilled_slots: number;
+        pool_available: number;
+        excluded_clashes: Array<{
+          emp_id: string;
+          faculty_name: string;
+          reason: string;
+          matching_courses: string[];
+        }>;
+      }>(`/api/exams/${activeSession.id}/auto-assign-invigilators`, {
+        method: 'POST',
+        body: JSON.stringify({ rule: autoRule }),
+      });
+      setExcludedClashes(res.excluded_clashes || []);
+      await Promise.all([onRefreshAllocations(), fetchWillingnessForSession()]);
+      setStatusMsg(
+        `Auto-assigned ${res.assigned_rooms} / ${allocations.length} halls (${
+          autoRule === 'ONE_PER_30' ? '1 per 30 students' : '2 per room'
+        }) using lowest-duty fair rotation.${
+          res.excluded_clashes?.length
+            ? ` Excluded ${res.excluded_clashes.length} faculty due to subject/slot clash.`
+            : ''
+        }`
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setAutoAssigning(false);
+    }
+  }
+
+  const sessionCourseCodes = useMemo(() => {
+    const codes = new Set<string>();
+    if (!activeSession) return codes;
+    const selectedSet = new Set(activeSession.selected_subject_ids || []);
+    for (const s of subjectsCatalog) {
+      if (selectedSet.has(s.id) && s.course_code) {
+        codes.add(s.course_code.trim().toUpperCase());
+      }
+    }
+    for (const val of Object.values(activeSession.subject_mapping || {})) {
+      const m = String(val || '').match(/\b([0-9]{2,4}[A-Z]{1,4}[0-9A-Z]{1,6})\b/i);
+      if (m) codes.add(m[1].toUpperCase());
+    }
+    return codes;
+  }, [activeSession, subjectsCatalog]);
+
+  const facultyClashesByEmpId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const w of willingnessRows) {
+      const matching = (w.teaching_courses || []).filter((c) =>
+        sessionCourseCodes.has(String(c).trim().toUpperCase())
+      );
+      if (matching.length > 0) {
+        map.set(w.emp_id.trim(), matching);
+      }
+    }
+    return map;
+  }, [willingnessRows, sessionCourseCodes]);
 
   if (!activeSession || allocations.length === 0) {
     return (
@@ -334,33 +430,128 @@ export function WillingnessStep({
                     <th className="py-2 px-3">Emp ID</th>
                     <th className="py-2 px-3">Faculty Name</th>
                     <th className="py-2 px-3">Designation</th>
+                    <th className="py-2 px-3">Teaching Courses</th>
+                    <th className="py-2 px-3 text-center">Duties Assigned</th>
                     <th className="py-2 px-3 text-center">Willing ({activeSession.session_slot})</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
-                  {willingnessRows.map((w, idx) => (
-                    <tr key={w.id}>
-                      <td className="py-2 px-3 font-mono-tabular text-slate-500">{idx + 1}</td>
-                      <td className="py-2 px-3 font-mono-tabular font-semibold">{w.emp_id}</td>
-                      <td className="py-2 px-3 font-medium text-slate-900 dark:text-white">
-                        {w.faculty_name}
-                      </td>
-                      <td className="py-2 px-3 text-slate-600 dark:text-slate-400">{w.designation}</td>
-                      <td className="py-2 px-3 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 text-[11px] font-mono-tabular font-semibold ${
-                            w.willing === 'YES'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
-                          }`}
-                        >
-                          {w.willing}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {willingnessRows.map((w, idx) => {
+                    const clashCourses = facultyClashesByEmpId.get(w.emp_id.trim()) || [];
+                    return (
+                      <tr key={w.id}>
+                        <td className="py-2 px-3 font-mono-tabular text-slate-500">{idx + 1}</td>
+                        <td className="py-2 px-3 font-mono-tabular font-semibold">{w.emp_id}</td>
+                        <td className="py-2 px-3 font-medium text-slate-900 dark:text-white">
+                          {w.faculty_name}
+                        </td>
+                        <td className="py-2 px-3 text-slate-600 dark:text-slate-400">{w.designation}</td>
+                        <td className="py-2 px-3 font-mono-tabular text-[11px]">
+                          {w.teaching_courses && w.teaching_courses.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-slate-700 dark:text-slate-300">
+                                {w.teaching_courses.join(', ')}
+                              </span>
+                              {clashCourses.length > 0 && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                                  CLASH ({clashCourses.join(', ')})
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-center font-mono-tabular font-semibold text-slate-700 dark:text-slate-300">
+                          {w.duty_count ?? 0}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          <span
+                            className={`inline-block px-2 py-0.5 text-[11px] font-mono-tabular font-semibold ${
+                              w.willing === 'YES'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                            }`}
+                          >
+                            {w.willing}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Automated Duty Roster & Conflict Checker */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[8px] p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="font-display text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+              <Wand2 className="w-4 h-4 text-[#cf6c38]" />
+              <span>Automated Invigilator Duty Roster &amp; Clash Checker</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Auto-assigns willing faculty ordered by lowest cumulative duty count while excluding teachers whose courses are examined in this session or who are already booked in this slot.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex border border-slate-300 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setAutoRule('TWO_PER_ROOM')}
+                className={`px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                  autoRule === 'TWO_PER_ROOM'
+                    ? 'bg-[#0b5299] text-white'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                2 per Room
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutoRule('ONE_PER_30')}
+                className={`px-3 py-1.5 text-xs font-medium border-l border-slate-300 dark:border-slate-700 cursor-pointer ${
+                  autoRule === 'ONE_PER_30'
+                    ? 'bg-[#0b5299] text-white'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                1 per 30 Students
+              </button>
+            </div>
+            <button
+              type="button"
+              disabled={autoAssigning || willingFaculty.length === 0}
+              onClick={() => void handleAutoAssign()}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-[#cf6c38] hover:bg-[#b85a29] disabled:opacity-50 text-white rounded-none cursor-pointer whitespace-nowrap"
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>{autoAssigning ? 'Assigning Roster...' : 'Auto-Assign Willing Faculty'}</span>
+            </button>
+          </div>
+        </div>
+
+        {excludedClashes.length > 0 && (
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-300">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Excluded Faculty Clashes Detected ({excludedClashes.length})</span>
+            </div>
+            <div className="space-y-1 text-[11px] text-amber-900 dark:text-amber-200">
+              {excludedClashes.map((c) => (
+                <div key={`${c.emp_id}-${c.reason}`} className="font-mono-tabular">
+                  <span className="font-semibold">
+                    {c.faculty_name} ({c.emp_id})
+                  </span>
+                  : {c.reason}
+                  {c.matching_courses.length > 0 ? ` [${c.matching_courses.join(', ')}]` : ''}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -382,109 +573,135 @@ export function WillingnessStep({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
-              {drafts.map((d, idx) => (
-                <tr key={d.allocation_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="py-3 px-4 font-mono-tabular font-semibold text-slate-900 dark:text-white whitespace-nowrap">
-                    {d.room_no}
-                  </td>
-                  <td className="py-2.5 px-3 space-y-1">
-                    {willingFaculty.length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          const found = willingFaculty.find((f) => f.emp_id === e.target.value);
-                          if (found) {
-                            updateDraft(idx, {
-                              invigilator_1_name: found.faculty_name,
-                              invigilator_1_emp_id: found.emp_id,
-                              invigilator_1_willing: true,
-                            });
-                          }
-                        }}
-                        className="w-full min-w-[175px] px-2 py-1 text-[11px] border border-[#0b5299]/40 bg-[#eef3f9] dark:bg-sky-950 text-slate-800 dark:text-slate-100"
-                      >
-                        <option value="">-- Select Willing Faculty (YES) --</option>
-                        {willingFaculty.map((f) => (
-                          <option key={f.emp_id} value={f.emp_id}>
-                            {f.faculty_name} ({f.emp_id})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      type="text"
-                      value={d.invigilator_1_name}
-                      onChange={(e) => updateDraft(idx, { invigilator_1_name: e.target.value })}
-                      placeholder="Invigilator I Name"
-                      className="w-full min-w-[175px] px-2.5 py-1.5 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
-                    />
-                  </td>
-                  <td className="py-2.5 px-3 align-bottom">
-                    <input
-                      type="text"
-                      value={d.invigilator_1_emp_id}
-                      onChange={(e) => updateDraft(idx, { invigilator_1_emp_id: e.target.value })}
-                      className="w-full min-w-[95px] px-2.5 py-1.5 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
-                    />
-                  </td>
-                  <td className="py-2.5 px-3 text-center align-bottom pb-4">
-                    <input
-                      type="checkbox"
-                      checked={d.invigilator_1_willing}
-                      onChange={(e) => updateDraft(idx, { invigilator_1_willing: e.target.checked })}
-                      className="accent-[#0b5299] w-4 h-4 cursor-pointer"
-                    />
-                  </td>
-                  <td className="py-2.5 px-3 space-y-1">
-                    {willingFaculty.length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          const found = willingFaculty.find((f) => f.emp_id === e.target.value);
-                          if (found) {
-                            updateDraft(idx, {
-                              invigilator_2_name: found.faculty_name,
-                              invigilator_2_emp_id: found.emp_id,
-                              invigilator_2_willing: true,
-                            });
-                          }
-                        }}
-                        className="w-full min-w-[175px] px-2 py-1 text-[11px] border border-[#0b5299]/40 bg-[#eef3f9] dark:bg-sky-950 text-slate-800 dark:text-slate-100"
-                      >
-                        <option value="">-- Select Willing Faculty (YES) --</option>
-                        {willingFaculty.map((f) => (
-                          <option key={f.emp_id} value={f.emp_id}>
-                            {f.faculty_name} ({f.emp_id})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      type="text"
-                      value={d.invigilator_2_name}
-                      onChange={(e) => updateDraft(idx, { invigilator_2_name: e.target.value })}
-                      placeholder="Invigilator II Name"
-                      className="w-full min-w-[175px] px-2.5 py-1.5 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
-                    />
-                  </td>
-                  <td className="py-2.5 px-3 align-bottom">
-                    <input
-                      type="text"
-                      value={d.invigilator_2_emp_id}
-                      onChange={(e) => updateDraft(idx, { invigilator_2_emp_id: e.target.value })}
-                      className="w-full min-w-[95px] px-2.5 py-1.5 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
-                    />
-                  </td>
-                  <td className="py-2.5 px-3 text-center align-bottom pb-4">
-                    <input
-                      type="checkbox"
-                      checked={d.invigilator_2_willing}
-                      onChange={(e) => updateDraft(idx, { invigilator_2_willing: e.target.checked })}
-                      className="accent-[#0b5299] w-4 h-4 cursor-pointer"
-                    />
-                  </td>
-                </tr>
-              ))}
+              {drafts.map((d, idx) => {
+                const clash1 = d.invigilator_1_emp_id
+                  ? facultyClashesByEmpId.get(d.invigilator_1_emp_id.trim()) || []
+                  : [];
+                const clash2 = d.invigilator_2_emp_id
+                  ? facultyClashesByEmpId.get(d.invigilator_2_emp_id.trim()) || []
+                  : [];
+                return (
+                  <tr key={d.allocation_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="py-3 px-4 font-mono-tabular font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+                      {d.room_no}
+                    </td>
+                    <td className="py-2.5 px-3 space-y-1">
+                      {willingFaculty.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const found = willingFaculty.find((f) => f.emp_id === e.target.value);
+                            if (found) {
+                              updateDraft(idx, {
+                                invigilator_1_name: found.faculty_name,
+                                invigilator_1_emp_id: found.emp_id,
+                                invigilator_1_willing: true,
+                              });
+                            }
+                          }}
+                          className="w-full min-w-[175px] px-2 py-1 text-[11px] border border-[#0b5299]/40 bg-[#eef3f9] dark:bg-sky-950 text-slate-800 dark:text-slate-100"
+                        >
+                          <option value="">-- Select Willing Faculty (YES) --</option>
+                          {willingFaculty.map((f) => {
+                            const clash = facultyClashesByEmpId.get(f.emp_id.trim());
+                            return (
+                              <option key={f.emp_id} value={f.emp_id}>
+                                {f.faculty_name} ({f.emp_id}) [{f.duty_count ?? 0}d]
+                                {clash ? ` - CLASH (${clash.join(',')})` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+                      <input
+                        type="text"
+                        value={d.invigilator_1_name}
+                        onChange={(e) => updateDraft(idx, { invigilator_1_name: e.target.value })}
+                        placeholder="Invigilator I Name"
+                        className="w-full min-w-[175px] px-2.5 py-1.5 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
+                      />
+                      {clash1.length > 0 && (
+                        <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                          Subject clash warning: teaches {clash1.join(', ')}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 align-bottom">
+                      <input
+                        type="text"
+                        value={d.invigilator_1_emp_id}
+                        onChange={(e) => updateDraft(idx, { invigilator_1_emp_id: e.target.value })}
+                        className="w-full min-w-[95px] px-2.5 py-1.5 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
+                      />
+                    </td>
+                    <td className="py-2.5 px-3 text-center align-bottom pb-4">
+                      <input
+                        type="checkbox"
+                        checked={d.invigilator_1_willing}
+                        onChange={(e) => updateDraft(idx, { invigilator_1_willing: e.target.checked })}
+                        className="accent-[#0b5299] w-4 h-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="py-2.5 px-3 space-y-1">
+                      {willingFaculty.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const found = willingFaculty.find((f) => f.emp_id === e.target.value);
+                            if (found) {
+                              updateDraft(idx, {
+                                invigilator_2_name: found.faculty_name,
+                                invigilator_2_emp_id: found.emp_id,
+                                invigilator_2_willing: true,
+                              });
+                            }
+                          }}
+                          className="w-full min-w-[175px] px-2 py-1 text-[11px] border border-[#0b5299]/40 bg-[#eef3f9] dark:bg-sky-950 text-slate-800 dark:text-slate-100"
+                        >
+                          <option value="">-- Select Willing Faculty (YES) --</option>
+                          {willingFaculty.map((f) => {
+                            const clash = facultyClashesByEmpId.get(f.emp_id.trim());
+                            return (
+                              <option key={f.emp_id} value={f.emp_id}>
+                                {f.faculty_name} ({f.emp_id}) [{f.duty_count ?? 0}d]
+                                {clash ? ` - CLASH (${clash.join(',')})` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+                      <input
+                        type="text"
+                        value={d.invigilator_2_name}
+                        onChange={(e) => updateDraft(idx, { invigilator_2_name: e.target.value })}
+                        placeholder="Invigilator II Name"
+                        className="w-full min-w-[175px] px-2.5 py-1.5 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
+                      />
+                      {clash2.length > 0 && (
+                        <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                          Subject clash warning: teaches {clash2.join(', ')}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 align-bottom">
+                      <input
+                        type="text"
+                        value={d.invigilator_2_emp_id}
+                        onChange={(e) => updateDraft(idx, { invigilator_2_emp_id: e.target.value })}
+                        className="w-full min-w-[95px] px-2.5 py-1.5 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
+                      />
+                    </td>
+                    <td className="py-2.5 px-3 text-center align-bottom pb-4">
+                      <input
+                        type="checkbox"
+                        checked={d.invigilator_2_willing}
+                        onChange={(e) => updateDraft(idx, { invigilator_2_willing: e.target.checked })}
+                        className="accent-[#0b5299] w-4 h-4 cursor-pointer"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

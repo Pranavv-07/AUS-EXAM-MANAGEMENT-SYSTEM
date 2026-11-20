@@ -9,6 +9,9 @@ import {
   Download,
   Upload,
   Building2,
+  Pin,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
 import { apiFetch, downloadAuthorizedFile } from '../../lib/api.ts';
 import type {
@@ -18,6 +21,7 @@ import type {
   Hall,
   InterleaveStyle,
   MinorStreamOption,
+  PinnedStudentOverride,
   ScheduledSubject,
   SeatingMode,
   SessionSlot,
@@ -128,6 +132,15 @@ export function ScheduleStep({
   const [roomPatterns, setRoomPatterns] = useState<Record<string, number[]>>(
     activeSession?.layout_config?.room_patterns || {}
   );
+  const [bufferSeatsPerHall, setBufferSeatsPerHall] = useState<number>(
+    activeSession?.layout_config?.buffer_seats_per_hall ?? 0
+  );
+  const [pinnedStudents, setPinnedStudents] = useState<PinnedStudentOverride[]>(
+    activeSession?.layout_config?.pinned_students || []
+  );
+  const [pinRollInput, setPinRollInput] = useState('');
+  const [pinHallId, setPinHallId] = useState<number>(0);
+  const [pinReason, setPinReason] = useState('');
   const [minorFilter, setMinorFilter] = useState<string>(
     activeSession?.minor_stream_filter || 'Machine Intelligence'
   );
@@ -207,6 +220,8 @@ export function ScheduleStep({
       setSeatingMode(activeSession.seating_mode);
       setInterleaveStyle(activeSession.layout_config?.interleave_style || 'ALTERNATE_SEATS');
       setRoomPatterns(activeSession.layout_config?.room_patterns || {});
+      setBufferSeatsPerHall(activeSession.layout_config?.buffer_seats_per_hall ?? 0);
+      setPinnedStudents(activeSession.layout_config?.pinned_students || []);
       setMinorFilter(activeSession.minor_stream_filter || allMinorNames[0] || 'Machine Intelligence');
       setSelectedHallIds(activeSession.selected_hall_ids);
       setSubjectMapping(activeSession.subject_mapping || {});
@@ -217,8 +232,19 @@ export function ScheduleStep({
     () => ({
       interleave_style: interleaveStyle,
       room_patterns: roomPatterns,
+      buffer_seats_per_hall: bufferSeatsPerHall,
+      pinned_students: pinnedStudents,
+      ...(activeSession?.layout_config?.dispatch_buffer_pct !== undefined
+        ? { dispatch_buffer_pct: activeSession.layout_config.dispatch_buffer_pct }
+        : {}),
     }),
-    [interleaveStyle, roomPatterns]
+    [
+      interleaveStyle,
+      roomPatterns,
+      bufferSeatsPerHall,
+      pinnedStudents,
+      activeSession?.layout_config?.dispatch_buffer_pct,
+    ]
   );
 
   async function runCapacityCheck() {
@@ -231,6 +257,8 @@ export function ScheduleStep({
           seating_mode: seatingMode,
           minor_stream_filter: seatingMode === 'MINOR_STREAM' ? minorFilter : null,
           selected_hall_ids: selectedHallIds,
+          selected_subject_ids: selectedSubjectIds,
+          subject_mapping: subjectMapping,
           layout_config: currentLayoutConfig,
         }),
       });
@@ -242,7 +270,17 @@ export function ScheduleStep({
 
   useEffect(() => {
     void runCapacityCheck();
-  }, [targetYears, targetBranches, seatingMode, minorFilter, selectedHallIds, currentLayoutConfig, students.length]);
+  }, [
+    targetYears,
+    targetBranches,
+    seatingMode,
+    minorFilter,
+    selectedHallIds,
+    selectedSubjectIds,
+    subjectMapping,
+    currentLayoutConfig,
+    students.length,
+  ]);
 
   function applySubjectSelection(nextIds: number[]) {
     setSelectedSubjectIds(nextIds);
@@ -333,6 +371,22 @@ export function ScheduleStep({
       ...prev,
       [String(hallId)]: pattern,
     }));
+  }
+
+  function handleAddPin() {
+    const cleanRoll = pinRollInput.trim().toUpperCase();
+    const targetHall = pinHallId || selectedHallsList[0]?.id || 0;
+    if (!cleanRoll || !targetHall) return;
+    setPinnedStudents((prev) => [
+      ...prev.filter((p) => p.roll_no.toUpperCase() !== cleanRoll),
+      { roll_no: cleanRoll, hall_id: targetHall, reason: pinReason.trim() || undefined },
+    ]);
+    setPinRollInput('');
+    setPinReason('');
+  }
+
+  function handleRemovePin(rollNo: string) {
+    setPinnedStudents((prev) => prev.filter((p) => p.roll_no.toUpperCase() !== rollNo.toUpperCase()));
   }
 
   function handleSlotChange(slot: SessionSlot) {
@@ -1321,6 +1375,110 @@ export function ScheduleStep({
                     </div>
                   </div>
                 )}
+                {/* Buffer Seats & Pre-Allocation Student Pinning */}
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        Reserve Buffer Seats per Hall
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                        PwD students automatically receive Ground Floor room priority.
+                      </div>
+                    </div>
+                    <div className="inline-flex border border-slate-300 dark:border-slate-700">
+                      {[0, 1, 2].map((count) => (
+                        <button
+                          key={count}
+                          type="button"
+                          onClick={() => setBufferSeatsPerHall(count)}
+                          className={`px-3 py-1 text-xs font-mono-tabular font-semibold cursor-pointer ${
+                            count > 0 ? 'border-l border-slate-300 dark:border-slate-700' : ''
+                          } ${
+                            bufferSeatsPerHall === count
+                              ? 'bg-[#0b5299] text-white'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          {count}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedHallsList.length > 0 && (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        <Pin className="w-3.5 h-3.5 text-[#0b5299]" />
+                        <span>Pin Student to Specific Hall (Before Locking)</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                        <input
+                          type="text"
+                          value={pinRollInput}
+                          onChange={(e) => setPinRollInput(e.target.value)}
+                          placeholder="Roll No (e.g. AUS-26-10392)"
+                          className="sm:col-span-5 px-2.5 py-1.5 text-xs font-mono-tabular border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                        />
+                        <select
+                          value={pinHallId || selectedHallsList[0]?.id || 0}
+                          onChange={(e) => setPinHallId(Number(e.target.value))}
+                          className="sm:col-span-4 px-2 py-1.5 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                        >
+                          {selectedHallsList.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.room_no} ({h.floor})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleAddPin}
+                          className="sm:col-span-3 px-2.5 py-1.5 text-xs font-medium bg-[#0b5299] hover:bg-[#003a77] text-white rounded-none cursor-pointer"
+                        >
+                          Pin Seat
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={pinReason}
+                        onChange={(e) => setPinReason(e.target.value)}
+                        placeholder="Optional note (e.g. Ground-floor medical / Squad / Late clearance)"
+                        className="w-full px-2.5 py-1 text-[11px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                      />
+                      {pinnedStudents.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {pinnedStudents.map((pin) => {
+                            const h = activeHalls.find((item) => item.id === pin.hall_id);
+                            return (
+                              <div
+                                key={pin.roll_no}
+                                className="flex items-center justify-between px-2.5 py-1 bg-white dark:bg-slate-900 border border-[#0b5299]/30 text-[11px]"
+                              >
+                                <span className="font-mono-tabular font-semibold text-slate-900 dark:text-slate-100">
+                                  {pin.roll_no} → {h ? `${h.room_no} (${h.floor})` : `Hall #${pin.hall_id}`}
+                                  {pin.reason ? (
+                                    <span className="font-sans font-normal text-slate-500 ml-1.5">
+                                      · {pin.reason}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePin(pin.roll_no)}
+                                  className="text-slate-400 hover:text-[#ff0000] cursor-pointer"
+                                  title="Remove Pin"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {validation && (
@@ -1337,10 +1495,24 @@ export function ScheduleStep({
                     ) : (
                       <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     )}
-                    <div>
-                      <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-white">
-                        Capacity Validation
-                      </h3>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-white">
+                          Capacity Validation
+                        </h3>
+                        <div className="flex items-center gap-2 text-[11px] font-mono-tabular">
+                          {(validation.buffer_seats_reserved || 0) > 0 && (
+                            <span className="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200 font-semibold">
+                              Buffer: {validation.buffer_seats_reserved}
+                            </span>
+                          )}
+                          {(validation.excluded_count || 0) > 0 && (
+                            <span className="px-2 py-0.5 bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-[#ff0000] font-semibold">
+                              Excluded/Hold: {validation.excluded_count}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                       <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
                         {validation.message}
                       </p>
@@ -1362,6 +1534,45 @@ export function ScheduleStep({
                           </span>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {validation.excluded_students && validation.excluded_students.length > 0 && (
+                    <div className="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span>
+                          Excluded / Verification Hold Report ({validation.excluded_students.length}
+                          {validation.hold_count ? ` · ${validation.hold_count} Condonation Pending` : ''})
+                        </span>
+                      </div>
+                      <div className="max-h-[140px] overflow-y-auto border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800 text-[11px]">
+                        {validation.excluded_students.map((ex) => (
+                          <div
+                            key={`${ex.roll_no}-${ex.reason}-${ex.course_code || ''}`}
+                            className="px-2.5 py-1.5 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-800/40"
+                          >
+                            <div className="min-w-0 truncate">
+                              <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                                {ex.roll_no}
+                              </span>{' '}
+                              <span className="text-slate-600 dark:text-slate-400">
+                                ({ex.full_name} · {ex.branch} Y{ex.current_year})
+                              </span>
+                            </div>
+                            <span
+                              className={`shrink-0 px-1.5 py-0.5 font-mono-tabular text-[10px] font-semibold ${
+                                ex.reason === 'CONDONATION_PENDING'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200'
+                                  : 'bg-red-100 text-[#ff0000] dark:bg-red-950 dark:text-red-300'
+                              }`}
+                            >
+                              {ex.reason}
+                              {ex.course_code ? ` (${ex.course_code})` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
