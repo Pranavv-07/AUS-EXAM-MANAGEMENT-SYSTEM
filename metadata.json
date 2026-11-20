@@ -1,0 +1,6 @@
+{
+  "name": "Aditya University — Examination Seating & Scheduling System",
+  "description": "Institutional examination hall allocation, multi-cohort seating matrix engine, invigilation willingness management, and official PDF document generator for Aditya University.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
