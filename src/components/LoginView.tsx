@@ -37,39 +37,37 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
   }
 
   return (
-    <div className="flex-1 bg-[#f8f8f8] dark:bg-slate-950 flex flex-col lg:flex-row">
-      {/* Left: Institutional Campus Photography Panel */}
-      <div className="relative lg:w-[46%] min-h-[240px] lg:min-h-[620px] bg-[#0b233b] overflow-hidden flex flex-col justify-between">
-        <img
-          src="/assets/aistudio/image_6b434e63.png"
-          alt="Aditya University Aerial Campus"
-          loading="eager"
-          decoding="async"
-          className="absolute inset-0 w-full h-full object-cover opacity-70"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0b233b]/90 via-[#0b233b]/35 to-[#0b233b]/50" />
+    <div className="relative flex-1 w-full min-h-[calc(100vh-140px)] bg-[#0b233b] overflow-hidden flex items-center">
+      {/* Full-bleed Stretched Institutional Campus Photography */}
+      <img
+        src="/assets/aistudio/image_6b434e63.png"
+        alt="Aditya University Aerial Campus"
+        loading="eager"
+        decoding="async"
+        className="absolute inset-0 w-full h-full object-cover object-center select-none pointer-events-none"
+      />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0b233b]/80 via-[#0b233b]/45 to-[#0b233b]/65" />
 
-        <div className="relative z-10 p-6 lg:p-10 flex items-center gap-3">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-16 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-10">
+        {/* Left: Institutional Title & Campus Context */}
+        <div className="space-y-5 lg:max-w-lg">
           <UniversityCrest height={44} className="shrink-0" />
+          <div className="space-y-2">
+            <h1 className="font-display text-3xl lg:text-4xl font-medium text-white leading-tight [text-wrap:balance] drop-shadow-sm">
+              Examination Seating &amp; Scheduling
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-200 tracking-wide">
+              Surampalem · Andhra Pradesh · Examination Cell
+            </p>
+          </div>
         </div>
 
-        <div className="relative z-10 p-6 lg:p-10 space-y-1.5">
-          <h1 className="font-display text-2xl lg:text-3xl font-medium text-white leading-snug max-w-md [text-wrap:balance]">
-            Examination Seating &amp; Scheduling
-          </h1>
-          <p className="text-xs text-slate-200 tracking-wide">
-            Surampalem · Andhra Pradesh · Examination Cell
-          </p>
-        </div>
-      </div>
-
-      {/* Right: Unified Role-Based Login Gateway */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-16">
+        {/* Right: Unified Role-Based Login Gateway */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-md bg-white dark:bg-slate-900 border border-[#e5e7eb] dark:border-slate-800 rounded-[8px] p-8"
+          className="w-full max-w-md bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-[#e5e7eb] dark:border-slate-800 rounded-[8px] shadow-xl p-8 lg:ml-auto"
         >
           <div className="mb-6 pb-4 border-b border-slate-200 dark:border-slate-800">
             <h2 className="font-display text-2xl font-medium text-[#0b5299] dark:text-sky-400">

@@ -24,21 +24,31 @@ function decodeSafe(val: string): string {
 }
 
 const rawDatabaseUrl = process.env.DATABASE_URL || '';
-if (!rawDatabaseUrl) {
-  throw new Error(
-    'DATABASE_URL environment variable is required to connect to Supabase PostgreSQL.'
-  );
+const connectionString = rawDatabaseUrl ? normalizePgConnectionString(rawDatabaseUrl) : '';
+
+let poolInstance: Pool | null = null;
+
+export function isDatabaseConfigured(): boolean {
+  return Boolean(connectionString);
 }
 
-const connectionString = normalizePgConnectionString(rawDatabaseUrl);
-
-export const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000,
-});
+export function getPool(): Pool {
+  if (!connectionString) {
+    throw new Error(
+      'DATABASE_URL environment variable is not configured. Add DATABASE_URL in Vercel Project Settings -> Environment Variables and redeploy.'
+    );
+  }
+  if (!poolInstance) {
+    poolInstance = new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: process.env.VERCEL ? 3 : 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+    });
+  }
+  return poolInstance;
+}
 
 // Optional Supabase JS v2 Admin Client (server-side only)
 function resolveSupabaseUrl(dbUrl: string): string {
@@ -62,7 +72,7 @@ export async function queryAll<T extends QueryResultRow = Record<string, unknown
   sql: string,
   params: unknown[] = []
 ): Promise<T[]> {
-  const result = await pool.query<T>(sql, params);
+  const result = await getPool().query<T>(sql, params);
   return result.rows;
 }
 
@@ -70,7 +80,7 @@ export async function queryOne<T extends QueryResultRow = Record<string, unknown
   sql: string,
   params: unknown[] = []
 ): Promise<T | undefined> {
-  const result = await pool.query<T>(sql, params);
+  const result = await getPool().query<T>(sql, params);
   return result.rows[0];
 }
 
@@ -78,12 +88,12 @@ export async function execute(
   sql: string,
   params: unknown[] = []
 ): Promise<{ rowCount: number; rows: Record<string, unknown>[] }> {
-  const result = await pool.query(sql, params);
+  const result = await getPool().query(sql, params);
   return { rowCount: result.rowCount ?? 0, rows: result.rows };
 }
 
 export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
@@ -98,7 +108,7 @@ export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>)
 }
 
 export async function initDatabase(): Promise<void> {
-  await pool.query(`
+  await getPool().query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -268,7 +278,7 @@ export async function logAudit(
   actionType: string,
   details: string
 ): Promise<void> {
-  await pool.query(
+  await getPool().query(
     `INSERT INTO audit_logs (user_id, username, role, action_type, details) VALUES ($1, $2, $3, $4, $5)`,
     [userId, username, role, actionType, details]
   );
@@ -280,13 +290,13 @@ async function seedRequiredAccountsAndConfig(): Promise<void> {
     const adminHash = bcrypt.hashSync('admin123', 10);
     const examinerHash = bcrypt.hashSync('exam@123', 10);
 
-    await pool.query(
+    await getPool().query(
       `INSERT INTO users (username, password_hash, full_name, emp_id, department, role, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, 1)
        ON CONFLICT (username) DO NOTHING`,
       ['admin', adminHash, 'System Administrator', 'AU-ADMIN', 'Examination Cell', 'ADMIN']
     );
-    await pool.query(
+    await getPool().query(
       `INSERT INTO users (username, password_hash, full_name, emp_id, department, role, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, 1)
        ON CONFLICT (username) DO NOTHING`,
@@ -305,7 +315,7 @@ async function seedRequiredAccountsAndConfig(): Promise<void> {
       ['RB', 'RAMANUJAN BHAVAN', 'I FLOOR', 'RB-127', 'LAB', 9, 8, 2, '[2,2,2,2]', 72],
     ];
     for (const h of hallsSeed) {
-      await pool.query(
+      await getPool().query(
         `INSERT INTO halls (building_code, building_name, floor, room_no, room_type, grid_rows, grid_cols, bench_capacity, bench_pattern, total_capacity, is_active)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1)
          ON CONFLICT (room_no) DO NOTHING`,
@@ -325,7 +335,7 @@ async function seedRequiredAccountsAndConfig(): Promise<void> {
       ['ALL', 'SAP', 'SAP'],
     ];
     for (const m of minorsSeed) {
-      await pool.query(
+      await getPool().query(
         `INSERT INTO minor_stream_options (branch, name, code)
          VALUES ($1, $2, $3)
          ON CONFLICT (name) DO NOTHING`,
