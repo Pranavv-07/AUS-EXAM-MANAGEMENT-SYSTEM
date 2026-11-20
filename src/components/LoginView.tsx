@@ -38,6 +38,15 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
   return (
     <div className="relative flex-1 w-full min-h-[calc(100vh-140px)] bg-[#0b233b] overflow-hidden flex items-center">
+      {/* Preload post-login reveal video quietly for zero-latency playback */}
+      <video
+        src="/assets/aistudio/gemini_generated_video_e85b4aee_5d3ac3d8.mp4"
+        preload="auto"
+        muted
+        playsInline
+        className="hidden"
+        aria-hidden="true"
+      />
       {/* Full-bleed Stretched Institutional Campus Photography */}
       <img
         src="/assets/aistudio/image_6b434e63.png"

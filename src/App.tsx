@@ -4,6 +4,7 @@ import { apiFetch, getAuthToken, setAuthToken } from './lib/api.ts';
 import type { User } from './types/exam.ts';
 import { UniversityCrest } from './components/UniversityCrest.tsx';
 import { LoginView } from './components/LoginView.tsx';
+import { PostLoginSplash } from './components/PostLoginSplash.tsx';
 import { AdminPortal } from './components/AdminPortal.tsx';
 import { ExaminerPortal } from './components/ExaminerPortal.tsx';
 import {
@@ -68,6 +69,7 @@ function getMetaForPath(pathname: string, user: User | null) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [welcomeUser, setWelcomeUser] = useState<User | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname || '/');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -153,6 +155,7 @@ export default function App() {
 
   function handleLogout() {
     setAuthToken(null);
+    setWelcomeUser(null);
     setUser(null);
     navigate('/');
   }
@@ -357,6 +360,7 @@ export default function App() {
           <div id="main-content" className="flex-1 flex flex-col">
             <LoginView
               onLoginSuccess={(u) => {
+                setWelcomeUser(u);
                 setUser(u);
                 navigate('/');
               }}
@@ -368,6 +372,10 @@ export default function App() {
           <ExaminerPortal globalSearch={globalSearch} />
         )}
       </div>
+
+      {welcomeUser && (
+        <PostLoginSplash user={welcomeUser} onComplete={() => setWelcomeUser(null)} />
+      )}
 
       <SiteFooter onNavigate={navigate} />
       <FloatingControls onNavigateContact={() => navigate('/contact')} currentPath={currentPath} />

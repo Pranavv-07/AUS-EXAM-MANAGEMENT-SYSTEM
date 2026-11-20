@@ -23,24 +23,38 @@ function decodeSafe(val: string): string {
   }
 }
 
-const rawDatabaseUrl = process.env.DATABASE_URL || '';
-const connectionString = rawDatabaseUrl ? normalizePgConnectionString(rawDatabaseUrl) : '';
+function getRawDatabaseUrl(): string {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.SUPABASE_DB_URL ||
+    ''
+  ).trim();
+}
+
+function getConnectionString(): string {
+  const raw = getRawDatabaseUrl();
+  return raw ? normalizePgConnectionString(raw) : '';
+}
 
 let poolInstance: Pool | null = null;
 
 export function isDatabaseConfigured(): boolean {
-  return Boolean(connectionString);
+  return Boolean(getConnectionString());
 }
 
 export function getPool(): Pool {
-  if (!connectionString) {
+  const conn = getConnectionString();
+  if (!conn) {
     throw new Error(
       'DATABASE_URL environment variable is not configured. Add DATABASE_URL in Vercel Project Settings -> Environment Variables and redeploy.'
     );
   }
   if (!poolInstance) {
     poolInstance = new Pool({
-      connectionString,
+      connectionString: conn,
       ssl: { rejectUnauthorized: false },
       max: process.env.VERCEL ? 3 : 10,
       idleTimeoutMillis: 30000,
@@ -57,7 +71,7 @@ function resolveSupabaseUrl(dbUrl: string): string {
   return refMatch ? `https://${refMatch[1]}.supabase.co` : '';
 }
 
-const supabaseUrl = resolveSupabaseUrl(rawDatabaseUrl);
+const supabaseUrl = resolveSupabaseUrl(getRawDatabaseUrl());
 const supabaseSecretKey =
   process.env.SUPABASE_SECRET_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
 
