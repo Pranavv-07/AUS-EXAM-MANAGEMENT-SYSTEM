@@ -839,8 +839,8 @@ export function createApiApp(): express.Express {
         return;
       }
 
-      const cleanMinor = (minor_stream || 'NONE').trim();
-      const normalizedMinor = cleanMinor.toUpperCase() === 'NONE' || !cleanMinor ? 'NONE' : cleanMinor;
+      const cleanMinor = (minor_stream || '').trim();
+      const normalizedMinor = cleanMinor.toUpperCase() === 'NONE' || !cleanMinor ? '' : cleanMinor;
       const eligStatus = normalizeEligibilityStatus(eligibility_status, is_detained);
       const detainedFlag = eligStatus === 'DETAINED' ? 1 : 0;
 
@@ -899,9 +899,9 @@ export function createApiApp(): express.Express {
       const nextMinor =
         minor_stream !== undefined
           ? minor_stream.trim().toUpperCase() === 'NONE' || !minor_stream.trim()
-            ? 'NONE'
+            ? ''
             : minor_stream.trim()
-          : String(existing.minor_stream);
+          : String(existing.minor_stream || '');
 
       const nextElig =
         eligibility_status !== undefined
@@ -1079,8 +1079,8 @@ export function createApiApp(): express.Express {
           const yearParsed = parseInt(norm.currentyear || norm.year || '2', 10);
           const currentYear = Number.isNaN(yearParsed) ? 2 : Math.min(4, Math.max(1, yearParsed));
           const batchCode = norm.batchcode || norm.batch || '2025-2029';
-          const rawMinor = (norm.minorstream || norm.minor || 'NONE').trim();
-          const minorStream = rawMinor.toUpperCase() === 'NONE' || !rawMinor ? 'NONE' : rawMinor;
+          const rawMinor = (norm.minorstream || norm.minor || '').trim();
+          const minorStream = rawMinor.toUpperCase() === 'NONE' || !rawMinor ? '' : rawMinor;
           const detainedRaw = (norm.isdetained || norm.detained || 'NO').toLowerCase();
           const legacyDetained = ['1', 'true', 'yes', 'y'].includes(detainedRaw);
           const eligibilityStatus = normalizeEligibilityStatus(
@@ -2242,7 +2242,7 @@ export function createApiApp(): express.Express {
         const br = (branch || loaded.session.target_branches[0] || 'CSE').trim().toUpperCase();
         const inserted = await execute(
           `INSERT INTO students (roll_no, full_name, branch, current_year, batch_code, minor_stream, is_detained, eligibility_status, is_pwd)
-           VALUES ($1, $2, $3, $4, '2025-2029', 'NONE', 0, 'ELIGIBLE', 0) RETURNING *`,
+           VALUES ($1, $2, $3, $4, '2025-2029', '', 0, 'ELIGIBLE', 0) RETURNING *`,
           [cleanRoll, (full_name || `Late Reg ${cleanRoll}`).trim(), br, yr]
         );
         studentRow = inserted.rows[0];

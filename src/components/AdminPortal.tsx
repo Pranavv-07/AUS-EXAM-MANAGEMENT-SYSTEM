@@ -378,10 +378,12 @@ export function AdminPortal({ currentUser, globalSearch = '' }: AdminPortalProps
                           ? Math.round((item.count / analytics.active_students) * 100)
                           : 0;
                       return (
-                        <div key={item.minor_stream} className="space-y-1">
+                        <div key={item.minor_stream || '__BLANK__'} className="space-y-1">
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-medium text-slate-800 dark:text-slate-200">
-                              {item.minor_stream === 'NONE' ? 'Regular Core Track' : `Minor: ${item.minor_stream}`}
+                              {!item.minor_stream || item.minor_stream === 'NONE'
+                                ? 'No Minor Stream (Blank)'
+                                : `Minor: ${item.minor_stream}`}
                             </span>
                             <span className="font-mono-tabular text-slate-600 dark:text-slate-400">
                               {item.count} students ({pct}%)
@@ -389,7 +391,11 @@ export function AdminPortal({ currentUser, globalSearch = '' }: AdminPortalProps
                           </div>
                           <div className="h-2 bg-slate-100 dark:bg-slate-800 overflow-hidden">
                             <div
-                              className={item.minor_stream === 'NONE' ? 'h-full bg-slate-400' : 'h-full bg-[#cf6c38]'}
+                              className={
+                                !item.minor_stream || item.minor_stream === 'NONE'
+                                  ? 'h-full bg-slate-400'
+                                  : 'h-full bg-[#cf6c38]'
+                              }
                               style={{ width: `${Math.max(4, pct)}%` }}
                             />
                           </div>

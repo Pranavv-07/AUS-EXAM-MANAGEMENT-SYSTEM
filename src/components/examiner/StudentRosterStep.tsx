@@ -69,7 +69,7 @@ export function StudentRosterStep({
   const [branch, setBranch] = useState('CSE');
   const [currentYear, setCurrentYear] = useState(2);
   const [batchCode, setBatchCode] = useState('2025-2029');
-  const [minorStream, setMinorStream] = useState('NONE');
+  const [minorStream, setMinorStream] = useState('');
   const [eligibilityStatus, setEligibilityStatus] = useState<EligibilityStatus>('ELIGIBLE');
   const [isPwd, setIsPwd] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -116,7 +116,11 @@ export function StudentRosterStep({
   const filtered = students.filter((s) => {
     if (yearFilter !== 'ALL' && s.current_year !== Number(yearFilter)) return false;
     if (branchFilter !== 'ALL' && s.branch !== branchFilter) return false;
-    if (minorFilter !== 'ALL' && s.minor_stream !== minorFilter) return false;
+    if (minorFilter === 'NONE') {
+      if (s.minor_stream && s.minor_stream !== 'NONE') return false;
+    } else if (minorFilter !== 'ALL' && s.minor_stream !== minorFilter) {
+      return false;
+    }
     if (eligFilter === 'PWD' && !s.is_pwd) return false;
     if (eligFilter !== 'ALL' && eligFilter !== 'PWD' && s.eligibility_status !== eligFilter) return false;
 
@@ -273,7 +277,7 @@ export function StudentRosterStep({
     setBranch(branches[0] || 'CSE');
     setCurrentYear(2);
     setBatchCode('2025-2029');
-    setMinorStream('NONE');
+    setMinorStream('');
     setEligibilityStatus('ELIGIBLE');
     setIsPwd(false);
     setShowForm(true);
@@ -286,7 +290,7 @@ export function StudentRosterStep({
     setBranch(s.branch);
     setCurrentYear(s.current_year);
     setBatchCode(s.batch_code);
-    setMinorStream(s.minor_stream);
+    setMinorStream(!s.minor_stream || s.minor_stream === 'NONE' ? '' : s.minor_stream);
     setEligibilityStatus(s.eligibility_status || (s.is_detained ? 'DETAINED' : 'ELIGIBLE'));
     setIsPwd(Boolean(s.is_pwd));
     setShowForm(true);
@@ -909,7 +913,7 @@ export function StudentRosterStep({
                     onChange={(e) => setMinorStream(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
                   >
-                    <option value="NONE">NONE (Regular Track)</option>
+                    <option value="">— Blank (No Minor Stream) —</option>
                     {minorNames.map((m) => (
                       <option key={m} value={m}>
                         {m}
@@ -1022,7 +1026,7 @@ export function StudentRosterStep({
                   className="px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0b5299]"
                 >
                   <option value="ALL">All Minor Streams</option>
-                  <option value="NONE">Regular (NONE)</option>
+                  <option value="NONE">Blank (No Minor Stream)</option>
                   {minorNames.map((m) => (
                     <option key={m} value={m}>
                       {m}
@@ -1079,7 +1083,7 @@ export function StudentRosterStep({
                           Year {s.current_year}
                         </td>
                         <td className="py-2.5 px-4 font-medium text-[#0b5299] dark:text-sky-400">
-                          {s.minor_stream === 'NONE' ? '—' : s.minor_stream}
+                          {!s.minor_stream || s.minor_stream === 'NONE' ? '' : s.minor_stream}
                         </td>
                         <td className="py-2.5 px-4 font-mono-tabular">
                           <span

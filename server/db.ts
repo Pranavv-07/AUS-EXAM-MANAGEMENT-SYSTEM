@@ -142,7 +142,7 @@ export async function initDatabase(): Promise<void> {
       branch TEXT NOT NULL,
       current_year INTEGER NOT NULL CHECK(current_year BETWEEN 1 AND 4),
       batch_code TEXT NOT NULL DEFAULT '2025-2029',
-      minor_stream TEXT NOT NULL DEFAULT 'NONE',
+      minor_stream TEXT NOT NULL DEFAULT '',
       is_detained INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
